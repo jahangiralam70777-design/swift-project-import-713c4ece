@@ -234,8 +234,25 @@ export async function signUpWithEmail(input: {
 export async function resetPasswordForEmail(email: string) {
   await gateAuth("password_reset");
   const redirectTo = getAuthRedirectUrl("/reset-password");
-  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
-  if (error) throw error;
+  const result = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+  console.log("[auth-client] resetPasswordForEmail result", {
+    redirectTo,
+    data: result?.data,
+    error: result?.error,
+    errorMessage: result?.error?.message,
+    errorStatus: (result?.error as { status?: number } | null | undefined)?.status,
+    errorName: result?.error?.name,
+  });
+  if (result.error) {
+    const e = result.error as { message?: string; name?: string; status?: number };
+    const msg =
+      (typeof e.message === "string" && e.message.trim() && e.message.trim() !== "{}"
+        ? e.message.trim()
+        : null) ??
+      e.name ??
+      (e.status ? `Request failed (${e.status})` : "Could not send recovery link");
+    throw new Error(msg);
+  }
 }
 
 export async function updatePassword(newPassword: string) {
