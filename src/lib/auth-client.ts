@@ -11,6 +11,45 @@ import { getAuthRedirectUrl } from "@/lib/auth-redirects";
 
 const LOGIN_EVENT_KEY = "edumaster.login_event_id";
 
+function getSupabaseProjectUrl() {
+  return import.meta.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
+}
+
+function describeAuthError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return {
+      error,
+      type: typeof error,
+      name: undefined,
+      message: typeof error === "string" ? error : undefined,
+      stack: undefined,
+      cause: undefined,
+      status: undefined,
+      statusText: undefined,
+    };
+  }
+  const e = error as {
+    name?: unknown;
+    message?: unknown;
+    stack?: unknown;
+    cause?: unknown;
+    status?: unknown;
+    statusText?: unknown;
+  };
+  return {
+    error,
+    type: typeof error,
+    constructorName: error.constructor?.name,
+    keys: Object.keys(error),
+    name: e.name,
+    message: e.message,
+    stack: e.stack,
+    cause: e.cause,
+    status: e.status,
+    statusText: e.statusText,
+  };
+}
+
 export function clearClientAuthStorage(options: { all?: boolean } = {}) {
   if (typeof window === "undefined") return;
   try {
@@ -234,23 +273,33 @@ export async function signUpWithEmail(input: {
 export async function resetPasswordForEmail(email: string) {
   await gateAuth("password_reset");
   const redirectTo = getAuthRedirectUrl("/reset-password");
+  const recoverUrl = `${getSupabaseProjectUrl().replace(/\/+$/, "")}/auth/v1/recover?redirect_to=${encodeURIComponent(redirectTo)}`;
+  console.log("[auth-client] resetPasswordForEmail request", {
+    recoverUrl,
+    redirectTo,
+    hasSupabaseUrl: Boolean(getSupabaseProjectUrl()),
+    supabaseHost: getSupabaseProjectUrl() ? new URL(getSupabaseProjectUrl()).host : null,
+    hasPublishableKey: Boolean(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY),
+  });
   const result = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
   console.log("[auth-client] resetPasswordForEmail result", {
     redirectTo,
     data: result?.data,
-    error: result?.error,
-    errorMessage: result?.error?.message,
-    errorStatus: (result?.error as { status?: number } | null | undefined)?.status,
-    errorName: result?.error?.name,
+    recoverUrl,
+    error: describeAuthError(result?.error),
   });
   if (result.error) {
-    const e = result.error as { message?: string; name?: string; status?: number };
+    const e = result.error as { message?: string; name?: string; status?: number; statusText?: string };
     const msg =
       (typeof e.message === "string" && e.message.trim() && e.message.trim() !== "{}"
         ? e.message.trim()
         : null) ??
       e.name ??
-      (e.status ? `Request failed (${e.status})` : "Could not send recovery link");
+      (e.status ? `Request failed (${e.status}${e.statusText ? ` ${e.statusText}` : ""})` : null) ??
+      "Could not send recovery link";
+    if (e.name === "AuthRetryableFetchError" || e.status === 0 || /failed to fetch/i.test(msg)) {
+      throw new Error(`Password reset request failed before receiving a response: ${msg}. Failing request: ${recoverUrl}`);
+    }
     throw new Error(msg);
   }
 }
