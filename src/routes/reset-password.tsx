@@ -236,7 +236,7 @@ function ResetPassword() {
           <Requirements value={pw} />
         </div>
 
-        <NeonButton type="submit" disabled={loading}>
+        <NeonButton type="submit" disabled={loading || !ready}>
           {loading ? "Updating…" : "Reset password"}
         </NeonButton>
       </form>
