@@ -206,7 +206,7 @@ export async function signUpWithEmail(input: {
     }
   }
   const redirectTo =
-    typeof window !== "undefined" ? `${window.location.origin}/dashboard` : undefined;
+    typeof window !== "undefined" ? `${window.location.origin}/email-verified` : undefined;
   const { data, error } = await supabase.auth.signUp({
     email: input.email,
     password: input.password,
@@ -241,6 +241,18 @@ export async function resetPasswordForEmail(email: string) {
 
 export async function updatePassword(newPassword: string) {
   const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
+}
+
+export async function resendVerificationEmail(email: string) {
+  await gateAuth("signup");
+  const emailRedirectTo =
+    typeof window !== "undefined" ? `${window.location.origin}/email-verified` : undefined;
+  const { error } = await supabase.auth.resend({
+    type: "signup",
+    email,
+    options: { emailRedirectTo },
+  });
   if (error) throw error;
 }
 
