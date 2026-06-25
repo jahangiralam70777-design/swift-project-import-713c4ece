@@ -110,6 +110,14 @@ function AdminLogin() {
         <NeonButton type="submit" disabled={loading}>
           <Lock className="h-4 w-4" /> {loading ? "Signing in…" : "Secure login"}
         </NeonButton>
+        <div className="text-center">
+          <a
+            href="/forgot-password"
+            className="text-xs font-semibold text-[var(--neon-blue)] hover:underline"
+          >
+            Forgot admin password?
+          </a>
+        </div>
       </form>
 
       <div className="mt-5 grid grid-cols-3 gap-2 rounded-2xl border border-border bg-muted/30 p-3 text-[11px]">
