@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertPermission } from "@/lib/admin-permissions";
+import { getAuthRedirectUrl } from "@/lib/auth-redirects";
 
 function parseUA(ua: string | null | undefined) {
   const s = ua ?? "";
@@ -250,9 +251,11 @@ export const adminSendPasswordReset = createServerFn({ method: "POST" })
     const email = u?.user?.email;
     if (!email) throw new Error("User has no email on file");
     // SECURITY: do NOT accept redirectTo from clients (open-redirect / phishing
-    // surface). Rely on the redirect configured in Supabase project settings.
+    // surface). Always use the canonical production reset callback.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabaseAdmin.auth as any).resetPasswordForEmail(email);
+    const { error } = await (supabaseAdmin.auth as any).resetPasswordForEmail(email, {
+      redirectTo: getAuthRedirectUrl("/reset-password"),
+    });
     if (error) throw error;
     return { ok: true, email };
   });

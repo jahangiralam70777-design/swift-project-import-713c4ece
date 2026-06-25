@@ -1,1 +1,8 @@
 project_id = "iichgbjzifilnncyfkyy"
+
+[auth]
+site_url = "https://caaspirebd.xyz"
+additional_redirect_urls = [
+  "https://caaspirebd.xyz/email-verified",
+  "https://caaspirebd.xyz/reset-password",
+]

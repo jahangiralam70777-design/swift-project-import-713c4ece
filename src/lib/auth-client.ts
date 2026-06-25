@@ -7,6 +7,7 @@ import { checkAuthRateLimit } from "@/lib/rate-limit.functions";
 import { checkAuthAllowed } from "@/lib/auth-controls.functions";
 import { trackEvent } from "@/lib/tracking";
 import { clearSessionTimers } from "@/lib/session-timeout";
+import { getAuthRedirectUrl } from "@/lib/auth-redirects";
 
 const LOGIN_EVENT_KEY = "edumaster.login_event_id";
 
@@ -205,8 +206,7 @@ export async function signUpWithEmail(input: {
       throw e;
     }
   }
-  const redirectTo =
-    typeof window !== "undefined" ? `${window.location.origin}/email-verified` : undefined;
+  const redirectTo = getAuthRedirectUrl("/email-verified");
   const { data, error } = await supabase.auth.signUp({
     email: input.email,
     password: input.password,
@@ -233,8 +233,7 @@ export async function signUpWithEmail(input: {
 
 export async function resetPasswordForEmail(email: string) {
   await gateAuth("password_reset");
-  const redirectTo =
-    typeof window !== "undefined" ? `${window.location.origin}/reset-password` : undefined;
+  const redirectTo = getAuthRedirectUrl("/reset-password");
   const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
   if (error) throw error;
 }
@@ -246,8 +245,7 @@ export async function updatePassword(newPassword: string) {
 
 export async function resendVerificationEmail(email: string) {
   await gateAuth("signup");
-  const emailRedirectTo =
-    typeof window !== "undefined" ? `${window.location.origin}/email-verified` : undefined;
+  const emailRedirectTo = getAuthRedirectUrl("/email-verified");
   const { error } = await supabase.auth.resend({
     type: "signup",
     email,
