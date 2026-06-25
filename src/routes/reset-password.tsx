@@ -11,6 +11,7 @@ import {
   Requirements,
 } from "@/components/auth/AuthPrimitives";
 import { updatePassword } from "@/lib/auth-client";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/reset-password")({
   component: ResetPassword,
@@ -31,27 +32,131 @@ function ResetPassword() {
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
   const [loading, setLoading] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
   const navigate = useNavigate();
   const match = pw.length > 0 && pw === pw2;
 
-  // A-8: only allow access when a Supabase recovery token is present.
-  // Supabase delivers the recovery flow via the URL hash fragment
-  // (#access_token=...&type=recovery). Without it, redirect to /login.
+  // Supabase v2 recovery can arrive in three shapes depending on flow type:
+  //   1) PKCE (default):     /reset-password?code=<pkce>
+  //   2) Implicit / hash:    /reset-password#access_token=...&type=recovery
+  //   3) OTP token_hash:     /reset-password?token_hash=...&type=recovery
+  // Plus error redirects: ?error=access_denied&error_code=otp_expired
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const hash = window.location.hash || "";
-    if (!hash.includes("type=recovery")) {
-      navigate({ to: "/login", replace: true });
-    }
-  }, [navigate]);
+    let cancelled = false;
+
+    const url = new URL(window.location.href);
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const code = url.searchParams.get("code");
+    const tokenHash = url.searchParams.get("token_hash");
+    const typeParam = url.searchParams.get("type") || hash.get("type");
+    const errorCode =
+      url.searchParams.get("error_code") ||
+      url.searchParams.get("error") ||
+      hash.get("error_code") ||
+      hash.get("error");
+    const errorDescription =
+      url.searchParams.get("error_description") || hash.get("error_description");
+
+    // Track recovery event so we accept the session that gets set by
+    // detectSessionInUrl (implicit hash flow) without false negatives.
+    let sawRecovery = false;
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        sawRecovery = true;
+        if (!cancelled) setReady(true);
+      }
+    });
+
+    (async () => {
+      try {
+        if (errorCode) {
+          setLinkError(
+            errorDescription ||
+              (errorCode === "otp_expired"
+                ? "This password reset link has expired. Request a new one."
+                : "This password reset link is invalid. Request a new one."),
+          );
+          return;
+        }
+
+        // PKCE flow → exchange the code for a session.
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) {
+            setLinkError(error.message || "Reset link could not be verified.");
+            return;
+          }
+          if (!cancelled) {
+            setReady(true);
+            // strip ?code= from the URL
+            window.history.replaceState({}, "", "/reset-password");
+          }
+          return;
+        }
+
+        // OTP token_hash flow.
+        if (tokenHash && typeParam) {
+          const { error } = await supabase.auth.verifyOtp({
+            type: typeParam as "recovery",
+            token_hash: tokenHash,
+          });
+          if (error) {
+            setLinkError(error.message || "Reset link could not be verified.");
+            return;
+          }
+          if (!cancelled) {
+            setReady(true);
+            window.history.replaceState({}, "", "/reset-password");
+          }
+          return;
+        }
+
+        // Implicit hash flow (#access_token=...&type=recovery) — the
+        // Supabase client's detectSessionInUrl already consumed the hash
+        // and emits PASSWORD_RECOVERY. Give it a moment, then fall back
+        // to checking the current session.
+        if (typeParam === "recovery" || window.location.hash.includes("access_token")) {
+          // wait briefly for onAuthStateChange
+          await new Promise((r) => setTimeout(r, 400));
+          if (sawRecovery) return;
+        }
+
+        // Last resort — if a session exists at all (e.g. user already
+        // signed in via recovery on this tab), allow the form.
+        const { data } = await supabase.auth.getSession();
+        if (!cancelled) {
+          if (data.session) setReady(true);
+          else
+            setLinkError(
+              "This page can only be opened from a password reset email link.",
+            );
+        }
+      } catch (e) {
+        if (!cancelled)
+          setLinkError(
+            (e as Error).message || "Could not verify your reset link. Please try again.",
+          );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
+  }, []);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!ready) return toast.error("Reset link not verified yet.");
     if (pw.length < 8) return toast.error("Password must be at least 8 characters");
     if (!match) return toast.error("Passwords do not match");
     setLoading(true);
     try {
       await updatePassword(pw);
+      // sign out so the user must log in with the new password
+      await supabase.auth.signOut();
       toast.success("Password updated. Please sign in.");
       navigate({ to: "/login" });
     } catch (err) {
@@ -72,6 +177,25 @@ function ResetPassword() {
       <p className="mt-1.5 text-center text-sm text-muted-foreground">
         Choose a strong password to re-secure your account.
       </p>
+
+      {linkError && (
+        <div className="mt-5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-center text-xs text-rose-300">
+          {linkError}
+          <div className="mt-2">
+            <Link
+              to="/forgot-password"
+              className="font-semibold text-[var(--neon-blue)] hover:underline"
+            >
+              Request a new reset link
+            </Link>
+          </div>
+        </div>
+      )}
+      {!ready && !linkError && (
+        <p className="mt-5 text-center text-xs text-muted-foreground">
+          Verifying your reset link…
+        </p>
+      )}
 
       <form className="mt-7 space-y-4" onSubmit={onSubmit}>
         <div>
