@@ -6,6 +6,48 @@ import { AuthShell } from "@/components/auth/AuthShell";
 import { NeoInput, NeonButton, FieldLabel } from "@/components/auth/AuthPrimitives";
 import { resetPasswordForEmail } from "@/lib/auth-client";
 
+function normalizeAuthError(error: unknown): string {
+  if (!error) return "Could not send recovery link";
+  if (typeof error === "string") {
+    const trimmed = error.trim();
+    return trimmed && trimmed !== "{}" ? trimmed : "Could not send recovery link";
+  }
+  if (typeof error === "object") {
+    const e = error as Record<string, unknown>;
+    const candidates = [
+      e.message,
+      (e as { error_description?: unknown }).error_description,
+      (e as { error?: unknown }).error,
+      (e as { msg?: unknown }).msg,
+      e.name,
+    ];
+    for (const c of candidates) {
+      if (typeof c === "string") {
+        const trimmed = c.trim();
+        if (!trimmed || trimmed === "{}") continue;
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed && typeof parsed === "object") {
+            const inner =
+              (parsed as { message?: string }).message ??
+              (parsed as { error_description?: string }).error_description ??
+              (parsed as { error?: string }).error;
+            if (typeof inner === "string" && inner.trim()) return inner.trim();
+            if ((parsed as { error?: string }).error === "rate_limited") {
+              const retry = (parsed as { retry_after_seconds?: number }).retry_after_seconds;
+              return `Too many attempts. Try again${retry ? ` in ${retry}s` : " shortly"}.`;
+            }
+          }
+        } catch {
+          /* not JSON — use the string as-is */
+        }
+        return trimmed;
+      }
+    }
+  }
+  return "Could not send recovery link";
+}
+
 export const Route = createFileRoute("/forgot-password")({
   component: ForgotPassword,
   head: () => ({
@@ -33,7 +75,13 @@ function ForgotPassword() {
       setSent(true);
       toast.success("Recovery link sent. Check your inbox.");
     } catch (err) {
-      toast.error((err as Error).message ?? "Could not send recovery link");
+      console.error("[forgot-password] resetPasswordForEmail failed", {
+        error: err,
+        type: typeof err,
+        keys: err && typeof err === "object" ? Object.keys(err as object) : null,
+        message: (err as { message?: unknown })?.message,
+      });
+      toast.error(normalizeAuthError(err));
     } finally {
       setLoading(false);
     }
